@@ -15,13 +15,14 @@ And o.OrderDate>= '2016-01-01'
 Where o.CustomerID is null
 
 -- 4.List of Stock Items and total quantity for each stock item in Purchase Orders in Year 2013.
-Select a.StockItemID,SUM(a.QuantityPerOuter) as "Total Quantity"
-From Warehouse.StockItems a
-Left Join Warehouse.StockItemTransactions b on a.StockItemID = b.StockItemID
-Left Join Purchasing.PurchaseOrders c on b.PurchaseOrderID = c.PurchaseOrderID
-Where Year(OrderDate) = 2013
-Group by a.StockItemID 
-Order by StockItemID Asc
+Select si.StockItemName, il.Quantity as "Total Quantity"
+from Sales.InvoiceLines il
+join Warehouse.StockItems si on il.StockItemID = si.StockItemID
+join Purchasing.PurchaseOrderLines pol on pol.StockItemID = si.StockItemID
+Join Purchasing.PurchaseOrders po on po.PurchaseOrderID = pol.PurchaseOrderID
+where YEAR(po.OrderDate) = 2013
+Group by si.StockItemName ,il.Quantity
+
 
 -- 5.List of stock items that have at least 10 characters in description.
 Select StockItemName From Warehouse.StockItems si 
@@ -35,7 +36,7 @@ join Sales.CustomerTransactions ct on  ct.InvoiceID = il.InvoiceID
 join Sales.Customers c on c.CustomerID = ct.CustomerID
 join Application.Cities cs on cs.CityID = c.DeliveryCityID
 join Application.StateProvinces sp on cs.StateProvinceID = sp.StateProvinceID
-where sp.StateProvinceName !='Alabama' and sp.StateProvinceName!='Georgia' and Year!='2014'
+where sp.StateProvinceName !='Alabama' and sp.StateProvinceName!='Georgia' and Year(ct.FinalizationDate)!='2014'
 
 -- 7. List of States and Avg dates for processing (confirmed delivery date – order date).
 select sp.StateProvinceName, AVG(DATEDIFF(day, o.OrderDate, i.ConfirmedDeliveryTime)) as AvgDates
@@ -74,13 +75,20 @@ join Sales s on  s.StockItemID = p.StockItemID
 where PurchasesQuantity > SalesQuantity;
 
 -- 10. List of Customers and their phone number, together with the primary contact person’s name, to whom we did not sell more than 10  mugs (search by name) in the year 2016.
-select c1.CustomerName, c1.PhoneNumber, p1.FullName, p1.PhoneNumber
-from(select c.CustomerID, SUM(ol.Quantitiy) as 'SoldQuantity'
-	from (select StockItemID
+select c1.CustomerName, c1.PhoneNumber, p.FullName, p.PhoneNumber, s2.SoldQuantity
+from(
+select c.CustomerID, SUM(ol.Quantity) as 'SoldQuantity'
+	from (
+	select StockItemID
 	from Warehouse.StockItems 
-	where StockItemName like '%mug%') sids
-	join Sales.OrderLines ol on ol.StockItemID = sids.StockItemID
-	join Sales.Orders o on o.OrderID
+	where StockItemName like '%mug%') s1
+	join Sales.OrderLines ol on ol.StockItemID = s1.StockItemID
+	join Sales.Orders o on o.OrderID = ol.OrderID and YEAR(o.OrderDate)=2016
+	join Sales.Customers c on c.CustomerID = o.CustomerID
+	group by c.CustomerID
+	having SUM(ol.Quantity)<=10) s2
+join Sales.Customers c1 on c1.CustomerID = s2.CustomerID
+join Application.People p on p.PersonID = c1.PrimaryContactPersonID
 
 -- 11. List all the cities that were updated after 2015-01-01.
 select c.CityName
@@ -124,7 +132,8 @@ order by p.StockGroupID
 
 
 -- 14.	List of Cities in the US and the stock item that the city got the most deliveries in 2016. If the city did not purchase any stock items in 2016, print “No Sales”.
-with cte0 as (
+with 
+cte1 as (
 	select ol.StockItemID, c.DeliveryCityID, COUNT(*) AS Delivery
 	FROM Sales.OrderLines ol
 		JOIN Sales.Orders o ON o.OrderID = ol.OrderID
@@ -132,17 +141,17 @@ with cte0 as (
 	WHERE YEAR(o.OrderDate) = 2016
 	GROUP BY ol.StockItemID, c.DeliveryCityID),
 
-cte1 AS(
+cte2 AS(
 	SELECT StockItemID, DeliveryCityID
 	FROM ( 
 		SELECT StockItemID, DeliveryCityID, 
 			DENSE_RANK() OVER(PARTITION BY DeliveryCityId ORDER BY Delivery DESC) AS rnk
-		FROM cte0) a
+		FROM cte1) a
 	WHERE rnk = 1
 )
 
 SELECT c.CityName, ISNULL(s.StockItemName, 'No Sale') AS MostDelivery
-FROM cte1 c1 JOIN Warehouse.StockItems s ON c1.StockItemID = s.StockItemID
+FROM cte2 c1 JOIN Warehouse.StockItems s ON c1.StockItemID = s.StockItemID
 	RIGHT JOIN Application.Cities c ON c1.DeliveryCityID = c.CityID
 
 
